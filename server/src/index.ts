@@ -5,6 +5,8 @@
 +import paymentsRoutes from './routes/payments';
  
  const app: FastifyInstance = fastify({
+ }
+ )
 @@ .. @@
  await app.register(authRoutes, { prefix: '/auth' });
  await app.register(tenantRoutes, { prefix: '/tenants' });
