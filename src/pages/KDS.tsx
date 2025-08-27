@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useRef } from 'react';
 import { Clock, ChefHat, CheckCircle, AlertCircle } from 'lucide-react';
 import { whoami, getKDSOrders } from '../lib/api';
-import { subscribeOrderStatusEvents } from '../lib/realtime';
+import { subscribeOrderStatusEvents, createDebouncedCallback } from '../lib/realtime';
 
 interface KDSOrder {
   id: string;
@@ -16,13 +16,13 @@ const KDSPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
-  const refetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedRefetch = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     loadOrders();
     
     return () => {
-      // Cleanup subscriptions and timeouts
+      // Cleanup subscriptions
       unsubscribeFunctions.current.forEach(unsubscribe => {
         try {
           unsubscribe();
@@ -32,9 +32,7 @@ const KDSPage = () => {
       });
       unsubscribeFunctions.current = [];
       
-      if (refetchTimeoutRef.current) {
-        clearTimeout(refetchTimeoutRef.current);
-      }
+      // No need to cleanup debounced function as it's handled internally
     };
   }, []);
 
@@ -51,6 +49,11 @@ const KDSPage = () => {
       if (userData.primary_tenant_id) {
         startRealtimeListeners(userData.primary_tenant_id);
       }
+
+      // Create debounced refetch function
+      debouncedRefetch.current = createDebouncedCallback(() => {
+        loadKDSData();
+      }, 300);
 
       const kdsData = await getKDSOrders();
       setOrders(kdsData);
@@ -69,8 +72,8 @@ const KDSPage = () => {
       const statusEventsUnsub = subscribeOrderStatusEvents({
         tenantId,
         onInsert: (event) => {
-          if (event.new?.order_id) {
-            invalidateLaneFor(event.new.order_id);
+          if (event.new?.order_id && debouncedRefetch.current) {
+            debouncedRefetch.current();
           }
         }
       });
@@ -80,15 +83,13 @@ const KDSPage = () => {
     }
   };
 
-  const invalidateLaneFor = (orderId: string) => {
-    // Debounce refetch to avoid too many API calls
-    if (refetchTimeoutRef.current) {
-      clearTimeout(refetchTimeoutRef.current);
+  const loadKDSData = async () => {
+    try {
+      const kdsData = await getKDSOrders();
+      setOrders(kdsData);
+    } catch (error) {
+      console.error('Error loading KDS data:', error);
     }
-    
-    refetchTimeoutRef.current = setTimeout(() => {
-      loadOrders();
-    }, 300);
   };
 
   const getStatusColor = (status: string) => {
