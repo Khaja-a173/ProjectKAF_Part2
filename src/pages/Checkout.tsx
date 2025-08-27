@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useRef } from 'react';
 import { getPaymentConfig } from '../lib/api';
 import MethodPicker from '../components/payments/MethodPicker';
 import PayButton from '../components/payments/PayButton';
+import { subscribePaymentIntents } from '../lib/realtime';
 import { ShoppingCart, AlertCircle } from 'lucide-react';
 
 interface PaymentConfig {
@@ -28,10 +30,32 @@ export default function Checkout() {
   const [selectedMethod, setSelectedMethod] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentIntentId, setCurrentIntentId] = useState<string | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
+  const unsubscribeFunctions = useRef<(() => void)[]>([]);
 
   useEffect(() => {
     loadPaymentConfig();
+    
+    return () => {
+      // Cleanup subscriptions
+      unsubscribeFunctions.current.forEach(unsubscribe => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing:', error);
+        }
+      });
+      unsubscribeFunctions.current = [];
+    };
   }, []);
+
+  useEffect(() => {
+    // Subscribe to payment intent updates when we have an intent ID
+    if (currentIntentId && paymentConfig.configured) {
+      startPaymentIntentListener(currentIntentId);
+    }
+  }, [currentIntentId, paymentConfig.configured]);
 
   const loadPaymentConfig = async () => {
     try {
@@ -50,6 +74,52 @@ export default function Checkout() {
     }
   };
 
+  const startPaymentIntentListener = (intentId: string) => {
+    try {
+      // We need tenant ID for the subscription - get it from auth context or API
+      // For now, we'll use a placeholder approach since we don't have direct access to tenant ID here
+      // In a real implementation, you'd get this from your auth context
+      const tenantId = 'current-tenant'; // This should come from auth context
+      
+      const paymentIntentUnsub = subscribePaymentIntents({
+        tenantId,
+        onUpdate: (event) => {
+          if (event.new?.id === intentId) {
+            handlePaymentIntentUpdate(event.new);
+          }
+        }
+      });
+      unsubscribeFunctions.current.push(paymentIntentUnsub);
+    } catch (error) {
+      console.error('Error starting payment intent listener:', error);
+    }
+  };
+
+  const handlePaymentIntentUpdate = (intent: any) => {
+    setPaymentStatus(intent.status);
+    
+    switch (intent.status) {
+      case 'processing':
+        // Show spinner - handled by PayButton component
+        break;
+      case 'requires_action':
+        // Prompt for 3DS or additional authentication
+        console.log('Payment requires additional action');
+        break;
+      case 'succeeded':
+        // Show success and navigate
+        setTimeout(() => {
+          window.location.href = '/checkout/success';
+        }, 1000);
+        break;
+      case 'failed':
+      case 'canceled':
+        // Show error
+        setError('Payment failed. Please try again.');
+        break;
+    }
+  };
+
   const formatCurrency = (amount: number, currency: string = 'USD') => {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
@@ -59,11 +129,15 @@ export default function Checkout() {
 
   const handlePaymentSuccess = (result: any) => {
     console.log('Payment successful:', result);
+    if (result.intent_id) {
+      setCurrentIntentId(result.intent_id);
+    }
     // In real app, you might update order status, clear cart, etc.
   };
 
   const handlePaymentError = (error: string) => {
     console.error('Payment error:', error);
+    setPaymentStatus('failed');
   };
 
   if (loading) {
