@@ -1,0 +1,468 @@
+{
+  "info": {
+    "name": "Phase 4 - Live Order Lifecycle & Payments",
+    "description": "Complete API collection for testing Phase 4 functionality",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "your-jwt-token-here",
+      "type": "string"
+    },
+    {
+      "key": "tenantCode",
+      "value": "DEMO",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Auth",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/_health",
+              "host": ["{{baseUrl}}"],
+              "path": ["_health"]
+            }
+          }
+        },
+        {
+          "name": "Who Am I (No Auth)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/whoami",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "whoami"]
+            }
+          }
+        },
+        {
+          "name": "Who Am I (With Auth)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/whoami",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "whoami"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "QR & Menu Flow",
+      "item": [
+        {
+          "name": "Get QR Context",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/qr/{{tenantCode}}/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["qr", "{{tenantCode}}", "1"]
+            }
+          }
+        },
+        {
+          "name": "Get Public Menu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/menu/public?tenantCode={{tenantCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["menu", "public"],
+              "query": [
+                {
+                  "key": "tenantCode",
+                  "value": "{{tenantCode}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cart & Checkout",
+      "item": [
+        {
+          "name": "Create Cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"menu_item_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n      \"qty\": 2,\n      \"note\": \"Extra spicy\"\n    }\n  ],\n  \"order_type\": \"dine_in\",\n  \"tenant_code\": \"{{tenantCode}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/cart",
+              "host": ["{{baseUrl}}"],
+              "path": ["cart"]
+            }
+          }
+        },
+        {
+          "name": "Get Cart",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cart/{{cartId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["cart", "{{cartId}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Checkout Intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cart_id\": \"{{cartId}}\",\n  \"provider\": \"mock\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/checkout/create-intent",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkout", "create-intent"]
+            }
+          }
+        },
+        {
+          "name": "Confirm Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intent_id\": \"{{intentId}}\",\n  \"provider_payload\": {\n    \"mock\": true\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/checkout/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["checkout", "confirm"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Order Management",
+      "item": [
+        {
+          "name": "Get Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders"]
+            }
+          }
+        },
+        {
+          "name": "Emit Order Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to_status\": \"preparing\",\n  \"note\": \"Started cooking\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/emit-status",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}", "emit-status"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "KDS (Kitchen Display)",
+      "item": [
+        {
+          "name": "Get KDS Lanes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kds/lanes",
+              "host": ["{{baseUrl}}"],
+              "path": ["kds", "lanes"]
+            }
+          }
+        },
+        {
+          "name": "Advance Order Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to_status\": \"ready\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/kds/orders/{{orderId}}/advance",
+              "host": ["{{baseUrl}}"],
+              "path": ["kds", "orders", "{{orderId}}", "advance"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Providers",
+      "item": [
+        {
+          "name": "Get Payment Providers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/providers",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "providers"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"mock\",\n  \"display_name\": \"Mock Payment Provider\",\n  \"is_live\": false,\n  \"is_enabled\": true,\n  \"is_default\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/providers",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "providers"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Provider",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Updated Mock Provider\",\n  \"is_enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/providers/{{providerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "providers", "{{providerId}}"]
+            }
+          }
+        },
+        {
+          "name": "Make Default Provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/providers/{{providerId}}/make-default",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "providers", "{{providerId}}", "make-default"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Events",
+      "item": [
+        {
+          "name": "Emit Payment Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_type\": \"payment_succeeded\",\n  \"payload\": {\n    \"amount\": 25.99,\n    \"currency\": \"USD\",\n    \"timestamp\": \"2024-01-15T10:30:00Z\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/intents/{{intentId}}/emit-event",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "intents", "{{intentId}}", "emit-event"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Legacy Payment APIs",
+      "item": [
+        {
+          "name": "Get Payment Config",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/config",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "config"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Intent (Legacy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 32.50,\n  \"currency\": \"USD\",\n  \"method\": \"card\",\n  \"order_id\": \"order_123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/intent",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "intent"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

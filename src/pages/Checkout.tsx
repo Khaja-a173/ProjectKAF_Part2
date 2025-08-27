@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { useRef } from 'react';
-import { getPaymentConfig } from '../lib/api';
+import { getPaymentConfig, confirmCheckout, cancelCheckout, emitPaymentEvent } from '../lib/api';
 import MethodPicker from '../components/payments/MethodPicker';
 import PayButton from '../components/payments/PayButton';
 import { subscribePaymentIntents } from '../lib/realtime';
-import { ShoppingCart, AlertCircle } from 'lucide-react';
+import { ShoppingCart, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 
 interface PaymentConfig {
   configured: boolean;
@@ -26,16 +27,22 @@ const MOCK_CART = {
 };
 
 export default function Checkout() {
+  const { intentId } = useParams<{ intentId: string }>();
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig>({ configured: false });
   const [selectedMethod, setSelectedMethod] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentIntentId, setCurrentIntentId] = useState<string | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
 
   useEffect(() => {
     loadPaymentConfig();
+    
+    if (intentId) {
+      setCurrentIntentId(intentId);
+    }
     
     return () => {
       // Cleanup subscriptions
@@ -100,7 +107,7 @@ export default function Checkout() {
     
     switch (intent.status) {
       case 'processing':
-        // Show spinner - handled by PayButton component
+        setProcessing(true);
         break;
       case 'requires_action':
         // Prompt for 3DS or additional authentication
@@ -108,6 +115,7 @@ export default function Checkout() {
         break;
       case 'succeeded':
         // Show success and navigate
+        setProcessing(false);
         setTimeout(() => {
           window.location.href = '/checkout/success';
         }, 1000);
@@ -115,6 +123,7 @@ export default function Checkout() {
       case 'failed':
       case 'canceled':
         // Show error
+        setProcessing(false);
         setError('Payment failed. Please try again.');
         break;
     }
@@ -138,6 +147,59 @@ export default function Checkout() {
   const handlePaymentError = (error: string) => {
     console.error('Payment error:', error);
     setPaymentStatus('failed');
+    setProcessing(false);
+  };
+
+  const handleMockPayment = async () => {
+    if (!currentIntentId) return;
+
+    try {
+      setProcessing(true);
+      setError(null);
+
+      // Emit payment started event
+      await emitPaymentEvent(currentIntentId, 'payment_started');
+      
+      // Simulate processing delay
+      setTimeout(async () => {
+        try {
+          // Confirm the payment
+          const result = await confirmCheckout({
+            intent_id: currentIntentId,
+            provider_payload: { mock: true }
+          });
+
+          if (result.status === 'succeeded') {
+            await emitPaymentEvent(currentIntentId, 'payment_succeeded');
+            setPaymentStatus('succeeded');
+            setTimeout(() => {
+              window.location.href = '/checkout/success';
+            }, 1000);
+          } else {
+            throw new Error('Payment confirmation failed');
+          }
+        } catch (err: any) {
+          await emitPaymentEvent(currentIntentId, 'payment_failed', { error: err.message });
+          setError(err.message || 'Payment failed');
+          setProcessing(false);
+        }
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to process payment');
+      setProcessing(false);
+    }
+  };
+
+  const handleCancelPayment = async () => {
+    if (!currentIntentId) return;
+
+    try {
+      await cancelCheckout({ intent_id: currentIntentId });
+      setPaymentStatus('canceled');
+      setError('Payment was canceled');
+    } catch (err: any) {
+      setError(err.message || 'Failed to cancel payment');
+    }
   };
 
   if (loading) {
@@ -154,7 +216,21 @@ export default function Checkout() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {paymentStatus === 'succeeded' ? (
+          <div className="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 text-center">
+            <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
+            <p className="text-gray-600 mb-4">Your order has been confirmed and is being prepared.</p>
+            <div className="animate-pulse text-sm text-gray-500">Redirecting...</div>
+          </div>
+        ) : paymentStatus === 'canceled' ? (
+          <div className="max-w-md mx-auto bg-white rounded-lg shadow-md p-6 text-center">
+            <XCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Canceled</h2>
+            <p className="text-gray-600 mb-4">Your payment was canceled. You can try again or contact support.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Order Summary */}
           <div className="bg-white shadow rounded-lg p-6">
             <div className="flex items-center mb-6">
@@ -218,26 +294,53 @@ export default function Checkout() {
               </div>
             ) : (
               <div className="space-y-6">
-                <MethodPicker
-                  methods={paymentConfig.enabled_methods || []}
-                  selectedMethod={selectedMethod}
-                  onMethodSelect={setSelectedMethod}
-                />
+                {processing ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Processing Payment</h3>
+                    <p className="text-gray-600">Please wait while we process your payment...</p>
+                    <button
+                      onClick={handleCancelPayment}
+                      className="mt-4 px-4 py-2 text-sm text-gray-600 hover:text-gray-800 focus:outline-none"
+                    >
+                      Cancel Payment
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <MethodPicker
+                      methods={paymentConfig.enabled_methods || []}
+                      selectedMethod={selectedMethod}
+                      onMethodSelect={setSelectedMethod}
+                    />
 
-                {selectedMethod && (
-                  <PayButton
-                    amount={MOCK_CART.total}
-                    currency={paymentConfig.currency || 'USD'}
-                    orderId={`order_${Date.now()}`}
-                    method={selectedMethod}
-                    onSuccess={handlePaymentSuccess}
-                    onError={handlePaymentError}
-                  />
+                    {selectedMethod && (
+                      <div className="space-y-4">
+                        {selectedMethod === 'cash' ? (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                            <p className="text-yellow-800">
+                              You've selected cash payment. Please pay at the counter when your order is ready.
+                            </p>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={handleMockPayment}
+                            disabled={processing}
+                            className="w-full flex items-center justify-center px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <ShoppingCart className="h-5 w-5 mr-2" />
+                            Pay {formatCurrency(MOCK_CART.total, paymentConfig.currency)}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
