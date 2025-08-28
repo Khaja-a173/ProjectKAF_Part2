@@ -6,6 +6,7 @@ import { whoami, getSummary, getRevenue, getFulfillmentTimeline } from '../lib/a
 import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents } from '../lib/realtime';
 import PaymentFunnel from '../components/analytics/PaymentFunnel';
 import PeakHours from '../components/analytics/PeakHours';
+import RevenueSeries from '../components/analytics/RevenueSeries';
 
 interface User {
   id: string;
@@ -22,6 +23,7 @@ const Dashboard: React.FC = () => {
   const [peakHoursRefreshTrigger, setPeakHoursRefreshTrigger] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [revenueSeriesRefreshTrigger, setRevenueSeriesRefreshTrigger] = useState(0);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
 
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h');
@@ -92,11 +94,13 @@ const Dashboard: React.FC = () => {
         onInsert: () => {
           refetchRevenue();
           triggerFunnelRefresh();
+          triggerRevenueSeriesRefresh();
         },
         onUpdate: () => {
           refetchRevenue();
           triggerFunnelRefresh();
           triggerPeakHoursRefresh();
+          triggerRevenueSeriesRefresh();
         }
       });
       unsubscribeFunctions.current.push(paymentIntentsUnsub);
@@ -138,6 +142,10 @@ const Dashboard: React.FC = () => {
 
   const triggerPeakHoursRefresh = () => {
     setPeakHoursRefreshTrigger(prev => prev + 1);
+  };
+
+  const triggerRevenueSeriesRefresh = () => {
+    setRevenueSeriesRefreshTrigger(prev => prev + 1);
   };
 
   const loadAnalytics = async () => {
@@ -255,6 +263,12 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Revenue Chart */}
+      <RevenueSeries 
+        window={timeWindow} 
+        key={`${timeWindow}-${revenueSeriesRefreshTrigger}`}
+      />
+
+      {/* Legacy Revenue Chart */}
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-gray-900">Revenue Over Time</h2>

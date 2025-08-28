@@ -48,15 +48,60 @@ const PeakHours: React.FC<PeakHoursProps> = ({ window, onRefresh }) => {
     }).format(parseFloat(amount));
   };
 
-  const formatWeekday = (weekday: number) => {
+  const getWeekdayName = (weekday: number) => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return days[weekday] || 'Unknown';
   };
 
   const formatHour = (hour24: number) => {
-    const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
-    const ampm = hour24 < 12 ? 'AM' : 'PM';
-    return `${hour12}${ampm}`;
+    if (hour24 === 0) return '12 AM';
+    if (hour24 < 12) return `${hour24} AM`;
+    if (hour24 === 12) return '12 PM';
+    return `${hour24 - 12} PM`;
+  };
+
+  // Create 7x24 grid data
+  const createHeatmapGrid = () => {
+    const grid: Array<Array<PeakHourRow | null>> = [];
+    
+    // Initialize 7x24 grid with nulls
+    for (let day = 0; day < 7; day++) {
+      grid[day] = new Array(24).fill(null);
+    }
+    
+    // Fill grid with actual data
+    if (data?.rows) {
+      data.rows.forEach(row => {
+        if (row.weekday >= 0 && row.weekday < 7 && row.hour24 >= 0 && row.hour24 < 24) {
+          grid[row.weekday][row.hour24] = row;
+        }
+      });
+    }
+    
+    return grid;
+  };
+
+  // Get max orders for color intensity
+  const getMaxOrders = () => {
+    if (!data?.rows) return 1;
+    return Math.max(...data.rows.map(row => row.orders_count), 1);
+  };
+
+  // Get color intensity based on orders count
+  const getCellColor = (ordersCount: number, maxOrders: number) => {
+    if (ordersCount === 0) return 'bg-gray-50';
+    const intensity = ordersCount / maxOrders;
+    if (intensity > 0.8) return 'bg-blue-600';
+    if (intensity > 0.6) return 'bg-blue-500';
+    if (intensity > 0.4) return 'bg-blue-400';
+    if (intensity > 0.2) return 'bg-blue-300';
+    return 'bg-blue-200';
+  };
+
+  const getCellTextColor = (ordersCount: number, maxOrders: number) => {
+    if (ordersCount === 0) return 'text-gray-400';
+    const intensity = ordersCount / maxOrders;
+    return intensity > 0.4 ? 'text-white' : 'text-gray-700';
   };
 
   if (loading) {
@@ -66,10 +111,12 @@ const PeakHours: React.FC<PeakHoursProps> = ({ window, onRefresh }) => {
           <Clock className="h-5 w-5 text-indigo-600 mr-2" />
           <h3 className="text-lg font-semibold text-gray-900">Peak Hours</h3>
         </div>
-        <div className="animate-pulse space-y-3">
-          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-          <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+        <div className="animate-pulse">
+          <div className="grid grid-cols-25 gap-1">
+            {Array.from({ length: 7 * 24 }).map((_, i) => (
+              <div key={i} className="h-6 bg-gray-200 rounded"></div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -90,7 +137,11 @@ const PeakHours: React.FC<PeakHoursProps> = ({ window, onRefresh }) => {
     );
   }
 
-  if (!data || data.rows.length === 0) {
+  const grid = createHeatmapGrid();
+  const maxOrders = getMaxOrders();
+  const hasData = data?.rows && data.rows.length > 0;
+
+  if (!hasData) {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex items-center mb-4">
@@ -99,24 +150,11 @@ const PeakHours: React.FC<PeakHoursProps> = ({ window, onRefresh }) => {
         </div>
         <div className="text-center py-8 text-gray-500">
           <TrendingUp className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <p>No activity in this window</p>
-          <p className="text-sm mt-1">Order activity will appear here once available</p>
+          <p>No traffic in this window</p>
         </div>
       </div>
     );
   }
-
-  // Sort data by weekday and hour for table display
-  const sortedRows = [...data.rows].sort((a, b) => {
-    if (a.weekday !== b.weekday) return a.weekday - b.weekday;
-    return a.hour24 - b.hour24;
-  });
-
-  // Get top 10 busiest periods for compact display
-  const topPeriods = sortedRows
-    .filter(row => row.orders_count > 0)
-    .sort((a, b) => b.orders_count - a.orders_count)
-    .slice(0, 10);
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
@@ -127,57 +165,57 @@ const PeakHours: React.FC<PeakHoursProps> = ({ window, onRefresh }) => {
         </div>
       </div>
 
-      {topPeriods.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Day
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Hour
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Orders
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Revenue
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {topPeriods.map((row, index) => (
-                <tr key={`${row.weekday}-${row.hour24}`} className={index < 3 ? 'bg-yellow-50' : ''}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {formatWeekday(row.weekday)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatHour(row.hour24)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                      {row.orders_count}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(row.revenue_total)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {topPeriods.length === 10 && sortedRows.filter(r => r.orders_count > 0).length > 10 && (
-            <p className="text-xs text-gray-500 mt-2 text-center">
-              Showing top 10 busiest periods
-            </p>
-          )}
+      <div className="overflow-x-auto">
+        {/* Hour labels */}
+        <div className="grid grid-cols-25 gap-1 mb-2">
+          <div className="text-xs text-gray-500"></div>
+          {Array.from({ length: 24 }).map((_, hour) => (
+            <div key={hour} className="text-xs text-gray-500 text-center">
+              {hour === 0 ? '12A' : hour < 12 ? `${hour}A` : hour === 12 ? '12P' : `${hour-12}P`}
+            </div>
+          ))}
         </div>
-      ) : (
-        <div className="text-center py-8 text-gray-500">
-          <p>No activity in this window</p>
+
+        {/* Heatmap grid */}
+        {grid.map((dayRow, dayIndex) => (
+          <div key={dayIndex} className="grid grid-cols-25 gap-1 mb-1">
+            {/* Day label */}
+            <div className="text-xs text-gray-500 flex items-center">
+              {getWeekdayName(dayIndex)}
+            </div>
+            
+            {/* Hour cells */}
+            {dayRow.map((cell, hourIndex) => {
+              const ordersCount = cell?.orders_count || 0;
+              const revenue = cell?.revenue_total || '0';
+              
+              return (
+                <div
+                  key={hourIndex}
+                  className={`h-6 rounded text-xs flex items-center justify-center cursor-pointer transition-colors ${getCellColor(ordersCount, maxOrders)} ${getCellTextColor(ordersCount, maxOrders)}`}
+                  title={ordersCount > 0 ? `${formatHour(hourIndex)}: ${ordersCount} orders • ${formatCurrency(revenue)}` : `${formatHour(hourIndex)}: No activity`}
+                >
+                  {ordersCount > 0 ? ordersCount : ''}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+        <span>Less activity</span>
+        <div className="flex items-center space-x-1">
+          <div className="w-3 h-3 bg-gray-50 rounded"></div>
+          <div className="w-3 h-3 bg-blue-200 rounded"></div>
+          <div className="w-3 h-3 bg-blue-300 rounded"></div>
+          <div className="w-3 h-3 bg-blue-400 rounded"></div>
+          <div className="w-3 h-3 bg-blue-500 rounded"></div>
+          <div className="w-3 h-3 bg-blue-600 rounded"></div>
         </div>
-      )}
+        <span>More activity</span>
+      </div>
     </div>
   );
 };

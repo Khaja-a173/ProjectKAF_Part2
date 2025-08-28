@@ -439,6 +439,64 @@ export const printReceipt = async (orderId: string, printerId?: string) => {
   return response.json();
 };
 
+export const getPeakHours = async (window: string = '7d') => {
+  const response = await fetch(`${API_BASE_URL}/analytics/peak-hours?window=${encodeURIComponent(window)}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication required');
+    }
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to get peak hours');
+  }
+
+  return response.json();
+};
+
+export const getRevenueSeries = async (window: string = '30d', granularity: string = 'day') => {
+  const response = await fetch(`${API_BASE_URL}/analytics/revenue-series?window=${encodeURIComponent(window)}&granularity=${encodeURIComponent(granularity)}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication required');
+    }
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to get revenue series');
+  }
+
+  return response.json();
+};
+
+export const getRevenueBreakdown = async (bucketISO: string, by: 'item' | 'category' | 'order_type', granularity: 'day' | 'week' | 'month' = 'day') => {
+  const q = new URLSearchParams({ bucket: bucketISO, by, granularity });
+  const response = await fetch(`${API_BASE_URL}/analytics/revenue-breakdown?${q.toString()}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication required');
+    }
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to get revenue breakdown');
+  }
+
+  return response.json();
+};
+
 export const getFulfillmentTimeline = async (window: string = '7d') => {
   const response = await fetch(`${API_BASE_URL}/analytics/fulfillment-timeline?window=${window}`, {
     headers: {
