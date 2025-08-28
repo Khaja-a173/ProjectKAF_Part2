@@ -1,25 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { useRef } from 'react';
 import { Clock, ChefHat, CheckCircle, AlertCircle } from 'lucide-react';
-import { whoami, getKDSOrders } from '../lib/api';
+import { whoami, getKDSLanes, advanceKDSOrder } from '../lib/api';
 import { subscribeOrderStatusEvents, createDebouncedCallback } from '../lib/realtime';
+
+interface KDSLanes {
+  queued: KDSOrder[];
+  preparing: KDSOrder[];
+  ready: KDSOrder[];
+}
 
 interface KDSOrder {
   id: string;
-  status: string;
-  items: any[];
+  table_id?: string;
+  order_type: string;
+  total_amount: number;
   created_at: string;
+  table_number?: string;
+  current_status: string;
+  items: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    unit_price: number;
+    note?: string;
+  }>;
 }
 
 const KDSPage = () => {
-  const [orders, setOrders] = useState<KDSOrder[]>([]);
+  const [lanes, setLanes] = useState<KDSLanes>({ queued: [], preparing: [], ready: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
   const debouncedRefetch = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    loadOrders();
+    loadKDSData();
     
     return () => {
       // Cleanup subscriptions
@@ -36,7 +52,7 @@ const KDSPage = () => {
     };
   }, []);
 
-  const loadOrders = async () => {
+  const loadKDSData = async () => {
     try {
       setLoading(true);
       const userData = await whoami();
@@ -52,15 +68,15 @@ const KDSPage = () => {
 
       // Create debounced refetch function
       debouncedRefetch.current = createDebouncedCallback(() => {
-        loadKDSData();
+        loadKDSLanes();
       }, 300);
 
-      const kdsData = await getKDSOrders();
-      setOrders(kdsData);
+      const kdsData = await getKDSLanes();
+      setLanes(kdsData);
       setError(null);
     } catch (err) {
-      setError('Failed to load orders');
-      console.error('Error loading orders:', err);
+      setError('Failed to load KDS data');
+      console.error('Error loading KDS data:', err);
     } finally {
       setLoading(false);
     }
@@ -83,28 +99,53 @@ const KDSPage = () => {
     }
   };
 
-  const loadKDSData = async () => {
+  const loadKDSLanes = async () => {
     try {
-      const kdsData = await getKDSOrders();
-      setOrders(kdsData);
+      const kdsData = await getKDSLanes();
+      setLanes(kdsData);
     } catch (error) {
-      console.error('Error loading KDS data:', error);
+      console.error('Error loading KDS lanes:', error);
+    }
+  };
+
+  const handleAdvanceOrder = async (orderId: string, toStatus: string) => {
+    try {
+      await advanceKDSOrder(orderId, toStatus);
+      // The realtime listener will update the UI automatically
+    } catch (error) {
+      console.error('Error advancing order:', error);
+      setError('Failed to advance order status');
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending':
+      case 'new':
+      case 'confirmed':
         return 'text-yellow-600';
       case 'preparing':
         return 'text-blue-600';
       case 'ready':
         return 'text-green-600';
-      case 'completed':
+      case 'served':
         return 'text-gray-600';
       default:
         return 'text-gray-600';
     }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount);
+  };
+
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   if (loading) {
@@ -137,36 +178,147 @@ const KDSPage = () => {
           </h1>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {orders.map((order) => (
-            <div key={order.id} className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Order #{order.id}
-                </h3>
-                <span className={`flex items-center ${getStatusColor(order.status)}`}>
-                  <CheckCircle className="h-4 w-4 mr-1" />
-                  {order.status}
-                </span>
-              </div>
-              
-              <div className="space-y-2 mb-4">
-                {order.items.map((item, index) => (
-                  <div key={index} className="text-sm text-gray-600">
-                    {item.quantity}x {item.name}
-                  </div>
-                ))}
-              </div>
-              
-              <div className="flex items-center text-xs text-gray-500">
-                <Clock className="h-3 w-3 mr-1" />
-                {new Date(order.created_at).toLocaleTimeString()}
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Queued Lane */}
+          <div className="bg-white rounded-lg shadow-md">
+            <div className="bg-yellow-500 text-white px-4 py-3 rounded-t-lg">
+              <h2 className="text-lg font-semibold">Queued ({lanes.queued.length})</h2>
             </div>
-          ))}
+            <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
+              {lanes.queued.map((order) => (
+                <div key={order.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-gray-900">
+                      Order #{order.id.slice(-8)}
+                    </h3>
+                    <span className="text-xs text-gray-500">
+                      {formatTime(order.created_at)}
+                    </span>
+                  </div>
+                  
+                  {order.table_number && (
+                    <p className="text-sm text-gray-600 mb-2">Table {order.table_number}</p>
+                  )}
+                  
+                  <div className="space-y-1 mb-3">
+                    {order.items.map((item, index) => (
+                      <div key={index} className="text-sm text-gray-700">
+                        {item.quantity}x {item.name}
+                        {item.note && <span className="text-gray-500 italic"> - {item.note}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-900">
+                      {formatCurrency(order.total_amount)}
+                    </span>
+                    <button
+                      onClick={() => handleAdvanceOrder(order.id, 'preparing')}
+                      className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                    >
+                      Start Preparing
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Preparing Lane */}
+          <div className="bg-white rounded-lg shadow-md">
+            <div className="bg-blue-500 text-white px-4 py-3 rounded-t-lg">
+              <h2 className="text-lg font-semibold">Preparing ({lanes.preparing.length})</h2>
+            </div>
+            <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
+              {lanes.preparing.map((order) => (
+                <div key={order.id} className="border rounded-lg p-4 border-blue-200">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-gray-900">
+                      Order #{order.id.slice(-8)}
+                    </h3>
+                    <span className="text-xs text-gray-500">
+                      {formatTime(order.created_at)}
+                    </span>
+                  </div>
+                  
+                  {order.table_number && (
+                    <p className="text-sm text-gray-600 mb-2">Table {order.table_number}</p>
+                  )}
+                  
+                  <div className="space-y-1 mb-3">
+                    {order.items.map((item, index) => (
+                      <div key={index} className="text-sm text-gray-700">
+                        {item.quantity}x {item.name}
+                        {item.note && <span className="text-gray-500 italic"> - {item.note}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-900">
+                      {formatCurrency(order.total_amount)}
+                    </span>
+                    <button
+                      onClick={() => handleAdvanceOrder(order.id, 'ready')}
+                      className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                    >
+                      Mark Ready
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Ready Lane */}
+          <div className="bg-white rounded-lg shadow-md">
+            <div className="bg-green-500 text-white px-4 py-3 rounded-t-lg">
+              <h2 className="text-lg font-semibold">Ready ({lanes.ready.length})</h2>
+            </div>
+            <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
+              {lanes.ready.map((order) => (
+                <div key={order.id} className="border rounded-lg p-4 border-green-200">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-gray-900">
+                      Order #{order.id.slice(-8)}
+                    </h3>
+                    <span className="text-xs text-gray-500">
+                      {formatTime(order.created_at)}
+                    </span>
+                  </div>
+                  
+                  {order.table_number && (
+                    <p className="text-sm text-gray-600 mb-2">Table {order.table_number}</p>
+                  )}
+                  
+                  <div className="space-y-1 mb-3">
+                    {order.items.map((item, index) => (
+                      <div key={index} className="text-sm text-gray-700">
+                        {item.quantity}x {item.name}
+                        {item.note && <span className="text-gray-500 italic"> - {item.note}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-900">
+                      {formatCurrency(order.total_amount)}
+                    </span>
+                    <button
+                      onClick={() => handleAdvanceOrder(order.id, 'served')}
+                      className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700"
+                    >
+                      Mark Served
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {orders.length === 0 && (
+        {lanes.queued.length === 0 && lanes.preparing.length === 0 && lanes.ready.length === 0 && (
           <div className="text-center py-12">
             <ChefHat className="h-16 w-16 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No orders</h3>
