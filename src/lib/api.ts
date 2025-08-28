@@ -500,4 +500,8 @@ export const getPeakHours = async (window: string = '7d') => {
   return response.json();
 };
 
+export function getPaymentFunnel(window = '7d') {
+  return apiRequest(`/analytics/payment-funnel?window=${encodeURIComponent(window)}`);
+}
+
 export default {

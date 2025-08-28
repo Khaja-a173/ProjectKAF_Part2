@@ -115,4 +115,37 @@ app.get<{ Querystring: { window?: string } }>('/peak-hours', {
 +  }
 +});
 +
+// GET /analytics/payment-funnel
+app.get<{ Querystring: { window?: string } }>('/payment-funnel', {
+  preHandler: [app.requireAuth]
+}, async (req, reply) => {
+  const tenantId = req.auth?.primaryTenantId;
+  if (!tenantId) {
+    return reply.code(400).send({ error: 'tenant_missing' });
+  }
+
+  const window = req.query.window || '7d';
+  
+  // Validate window parameter (strict)
+  const validWindows = ['7d', '30d', '90d', 'mtd', 'qtd', 'ytd'];
+  if (!validWindows.includes(window)) {
+    return reply.code(400).send({ error: 'invalid_window' });
+  }
+
+  try {
+    const result = await app.pg.query(
+      'SELECT stage, stage_order, intents, amount_total FROM app.payment_conversion_funnel($1::uuid, $2::text)',
+      [tenantId, window]
+    );
+
+    return reply.send({
+      window,
+      rows: result.rows
+    });
+  } catch (error: any) {
+    app.log.error('Error fetching payment funnel:', error);
+    return reply.code(500).send({ error: 'db_error' });
+  }
+});
+
  };

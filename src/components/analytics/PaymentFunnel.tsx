@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { CreditCard, TrendingUp, AlertCircle } from 'lucide-react';
 import { getPaymentFunnel } from '../../lib/api';
 
@@ -58,21 +57,21 @@ const PaymentFunnel: React.FC<PaymentFunnelProps> = ({ window, onRefresh }) => {
   const getStageColor = (stage: string) => {
     switch (stage) {
       case 'created':
-        return 'text-blue-600';
+        return 'bg-blue-500';
       case 'requires_action':
-        return 'text-yellow-600';
+        return 'bg-yellow-500';
       case 'confirmed':
-        return 'text-indigo-600';
+        return 'bg-indigo-500';
       case 'processing':
-        return 'text-purple-600';
+        return 'bg-purple-500';
       case 'succeeded':
-        return 'text-green-600';
+        return 'bg-green-500';
       case 'failed':
-        return 'text-red-600';
+        return 'bg-red-500';
       case 'canceled':
-        return 'text-gray-600';
+        return 'bg-gray-500';
       default:
-        return 'text-gray-600';
+        return 'bg-gray-400';
     }
   };
 
@@ -81,7 +80,7 @@ const PaymentFunnel: React.FC<PaymentFunnelProps> = ({ window, onRefresh }) => {
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex items-center mb-4">
           <CreditCard className="h-5 w-5 text-indigo-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Payment Funnel</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Payment Conversion Funnel</h3>
         </div>
         <div className="animate-pulse space-y-3">
           <div className="h-4 bg-gray-200 rounded w-3/4"></div>
@@ -97,7 +96,7 @@ const PaymentFunnel: React.FC<PaymentFunnelProps> = ({ window, onRefresh }) => {
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex items-center mb-4">
           <CreditCard className="h-5 w-5 text-indigo-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Payment Funnel</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Payment Conversion Funnel</h3>
         </div>
         <div className="flex items-center p-4 bg-red-50 border border-red-200 rounded-md">
           <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
@@ -112,91 +111,63 @@ const PaymentFunnel: React.FC<PaymentFunnelProps> = ({ window, onRefresh }) => {
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex items-center mb-4">
           <CreditCard className="h-5 w-5 text-indigo-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Payment Funnel</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Payment Conversion Funnel</h3>
         </div>
         <div className="text-center py-8 text-gray-500">
           <TrendingUp className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <p>No payment data yet</p>
+          <p>No payment activity in this window</p>
           <p className="text-sm mt-1">Payment intents will appear here once created</p>
         </div>
       </div>
     );
   }
 
-  // Prepare chart data
-  const chartData = data.rows.map(row => ({
-    stage: formatStage(row.stage),
-    intents: row.intents,
-    amount: parseFloat(row.amount_total)
-  }));
+  // Sort by stage_order and find max intents for bar sizing
+  const sortedRows = [...data.rows].sort((a, b) => a.stage_order - b.stage_order);
+  const maxIntents = Math.max(...sortedRows.map(row => row.intents));
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <CreditCard className="h-5 w-5 text-indigo-600 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900">Payment Funnel</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Payment Conversion Funnel</h3>
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="h-64 mb-6">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis 
-              dataKey="stage" 
-              angle={-45}
-              textAnchor="end"
-              height={80}
-              fontSize={12}
-            />
-            <YAxis />
-            <Tooltip 
-              formatter={(value, name) => [
-                name === 'intents' ? value : formatCurrency(value.toString()),
-                name === 'intents' ? 'Intents' : 'Amount'
-              ]}
-            />
-            <Bar dataKey="intents" fill="#3B82F6" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Stage
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Intents
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Amount
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {data.rows.map((row, index) => (
-              <tr key={index}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`font-medium ${getStageColor(row.stage)}`}>
-                    {formatStage(row.stage)}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {row.intents}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+      <div className="space-y-4">
+        {sortedRows.map((row) => {
+          const barWidth = maxIntents > 0 ? (row.intents / maxIntents) * 100 : 0;
+          
+          return (
+            <div key={row.stage} className="flex items-center space-x-4">
+              {/* Stage Label */}
+              <div className="w-32 text-sm font-medium text-gray-900 text-right">
+                {formatStage(row.stage)}
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="flex-1 relative">
+                <div className="w-full bg-gray-200 rounded-full h-6">
+                  <div
+                    className={`h-6 rounded-full ${getStageColor(row.stage)} transition-all duration-300`}
+                    style={{ width: `${barWidth}%` }}
+                  ></div>
+                </div>
+              </div>
+              
+              {/* Metrics */}
+              <div className="w-40 text-right">
+                <div className="text-sm font-semibold text-gray-900">
+                  {row.intents} intents
+                </div>
+                <div className="text-xs text-gray-500">
                   {formatCurrency(row.amount_total)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
