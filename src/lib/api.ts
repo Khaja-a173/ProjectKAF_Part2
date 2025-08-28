@@ -481,4 +481,23 @@ export const getPaymentFunnel = async (window: string = '7d') => {
   return response.json();
 };
 
+export const getPeakHours = async (window: string = '7d') => {
+  const response = await fetch(`${API_BASE_URL}/analytics/peak-hours?window=${encodeURIComponent(window)}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication required');
+    }
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to get peak hours');
+  }
+
+  return response.json();
+};
+
 export default {

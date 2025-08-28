@@ -40,6 +40,39 @@ app.get<{ Querystring: { window?: string } }>('/payment-funnel', {
   }
 });
 
+// GET /analytics/peak-hours
+app.get<{ Querystring: { window?: string } }>('/peak-hours', {
+  preHandler: [app.requireAuth]
+}, async (req, reply) => {
+  const tenantId = req.auth?.primaryTenantId;
+  if (!tenantId) {
+    return reply.code(400).send({ error: 'tenant_required' });
+  }
+
+  const window = req.query.window || '7d';
+  
+  // Validate window parameter (strict)
+  const validWindows = ['7d', '30d', '90d', 'mtd', 'qtd', 'ytd'];
+  if (!validWindows.includes(window)) {
+    return reply.code(400).send({ error: 'invalid_window' });
+  }
+
+  try {
+    const result = await app.pg.query(
+      'SELECT * FROM app.peak_hours_heatmap($1::uuid, $2::text)',
+      [tenantId, window]
+    );
+
+    return reply.send({
+      window,
+      rows: result.rows
+    });
+  } catch (error: any) {
+    app.log.error('Error fetching peak hours:', error);
+    return reply.code(500).send({ error: 'db_error' });
+  }
+});
+
 +// GET /analytics/fulfillment-timeline
 +app.get<{ Querystring: { window?: string } }>('/fulfillment-timeline', {
 +  preHandler: [app.requireAuth]

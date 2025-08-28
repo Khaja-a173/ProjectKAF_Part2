@@ -5,6 +5,7 @@ import { TrendingUp, Users, ShoppingCart, DollarSign, Calendar, Clock } from 'lu
 import { whoami, getSummary, getRevenue, getFulfillmentTimeline } from '../lib/api';
 import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents } from '../lib/realtime';
 import PaymentFunnel from '../components/analytics/PaymentFunnel';
+import PeakHours from '../components/analytics/PeakHours';
 
 interface User {
   id: string;
@@ -18,6 +19,7 @@ const Dashboard: React.FC = () => {
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [fulfillmentData, setFulfillmentData] = useState<any[]>([]);
   const [funnelRefreshTrigger, setFunnelRefreshTrigger] = useState(0);
+  const [peakHoursRefreshTrigger, setPeakHoursRefreshTrigger] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
@@ -79,6 +81,7 @@ const Dashboard: React.FC = () => {
         onInsert: () => {
           refetchSummary();
           refetchFulfillment();
+          triggerPeakHoursRefresh();
         }
       });
       unsubscribeFunctions.current.push(statusEventsUnsub);
@@ -93,6 +96,7 @@ const Dashboard: React.FC = () => {
         onUpdate: () => {
           refetchRevenue();
           triggerFunnelRefresh();
+          triggerPeakHoursRefresh();
         }
       });
       unsubscribeFunctions.current.push(paymentIntentsUnsub);
@@ -130,6 +134,10 @@ const Dashboard: React.FC = () => {
 
   const triggerFunnelRefresh = () => {
     setFunnelRefreshTrigger(prev => prev + 1);
+  };
+
+  const triggerPeakHoursRefresh = () => {
+    setPeakHoursRefreshTrigger(prev => prev + 1);
   };
 
   const loadAnalytics = async () => {
@@ -322,6 +330,12 @@ const Dashboard: React.FC = () => {
       <PaymentFunnel 
         window={timeWindow} 
         key={`${timeWindow}-${funnelRefreshTrigger}`}
+      />
+
+      {/* Peak Hours */}
+      <PeakHours 
+        window={timeWindow} 
+        key={`${timeWindow}-${peakHoursRefreshTrigger}`}
       />
     </div>
   );
