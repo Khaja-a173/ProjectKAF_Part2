@@ -439,4 +439,23 @@ export const printReceipt = async (orderId: string, printerId?: string) => {
   return response.json();
 };
 
+export const getFulfillmentTimeline = async (window: string = '7d') => {
+  const response = await fetch(`${API_BASE_URL}/analytics/fulfillment-timeline?window=${window}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication required');
+    }
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to get fulfillment timeline');
+  }
+
+  return response.json();
+};
+
 export default {

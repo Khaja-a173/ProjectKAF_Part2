@@ -1,0 +1,47 @@
+@@ .. @@
+   return reply.send({ window, granularity, series: revenueData });
+ });
+
++// GET /analytics/fulfillment-timeline
++app.get<{ Querystring: { window?: string } }>('/fulfillment-timeline', {
++  preHandler: [app.requireAuth]
++}, async (req, reply) => {
++  const tenantId = req.auth?.primaryTenantId;
++  if (!tenantId) {
++    return reply.code(400).send({ error: 'Missing tenant ID' });
++  }
++
++  const window = req.query.window || '7d';
++  
++  // Map window to interval text
++  const windowMap: Record<string, string> = {
++    '7d': '7 days',
++    '30d': '30 days', 
++    '90d': '90 days',
++    'mtd': '1 month',
++    'qtd': '3 months',
++    'ytd': '1 year'
++  };
++
++  const intervalText = windowMap[window];
++  if (!intervalText) {
++    return reply.code(400).send({ error: 'Invalid window parameter' });
++  }
++
++  try {
++    const result = await app.pg.query(
++      'SELECT * FROM app.order_fulfillment_timeline($1, $2)',
++      [tenantId, intervalText]
++    );
++
++    return reply.send({
++      window,
++      rows: result.rows
++    });
++  } catch (error: any) {
++    app.log.error('Error fetching fulfillment timeline:', error);
++    return reply.code(500).send({ error: 'Failed to fetch fulfillment timeline' });
++  }
++});
++
+ };
