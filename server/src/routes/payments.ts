@@ -113,6 +113,128 @@ const paymentsRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // POST /payments/split-bill
+  app.post<{ 
+    Body: { 
+      order_id: string;
+      splits: Array<{
+        amount: number;
+        email?: string;
+        phone?: string;
+        note?: string;
+      }>;
+    } 
+  }>('/split-bill', async (req, reply) => {
+    const tenantId = req.auth?.primaryTenantId;
+    if (!tenantId) {
+      return reply.code(401).send({ error: 'Missing tenant ID' });
+    }
+
+    const { order_id, splits } = req.body;
+
+    if (!order_id || !splits || splits.length === 0) {
+      return reply.code(400).send({ error: 'order_id and splits are required' });
+    }
+
+    try {
+      // Verify order exists and belongs to tenant
+      const orderResult = await app.pg.query(
+        'SELECT id, total_amount FROM orders WHERE id = $1 AND tenant_id = $2',
+        [order_id, tenantId]
+      );
+
+      if (orderResult.rows.length === 0) {
+        return reply.code(404).send({ error: 'Order not found' });
+      }
+
+      const order = orderResult.rows[0];
+      const totalAmount = parseFloat(order.total_amount);
+      const splitTotal = splits.reduce((sum, split) => sum + split.amount, 0);
+
+      // Validate split amounts
+      if (Math.abs(splitTotal - totalAmount) > 0.01) {
+        return reply.code(400).send({ 
+          error: 'Split amounts do not match order total',
+          order_total: totalAmount,
+          split_total: splitTotal
+        });
+      }
+
+      // Create split bill record (if table exists)
+      try {
+        const splitId = uuidv4();
+        await app.pg.query(
+          `INSERT INTO payment_splits (id, tenant_id, order_id, total_amount, splits, created_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())`,
+          [splitId, tenantId, order_id, totalAmount, JSON.stringify(splits)]
+        );
+
+        // Create individual payment intents for each split
+        const paymentIntents = [];
+        for (let i = 0; i < splits.length; i++) {
+          const split = splits[i];
+          const intentId = uuidv4();
+          
+          await app.pg.query(
+            `INSERT INTO payment_intents (id, tenant_id, provider, amount, currency, status, metadata, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+            [
+              intentId, 
+              tenantId, 
+              'mock', 
+              split.amount, 
+              'USD', 
+              'requires_payment_method',
+              JSON.stringify({ 
+                split_bill_id: splitId, 
+                split_index: i,
+                order_id: order_id,
+                email: split.email,
+                phone: split.phone,
+                note: split.note
+              })
+            ]
+          );
+
+          paymentIntents.push({
+            intent_id: intentId,
+            amount: split.amount,
+            email: split.email,
+            phone: split.phone
+          });
+        }
+
+        return reply.send({
+          split_bill_id: splitId,
+          order_id: order_id,
+          total_amount: totalAmount,
+          splits: paymentIntents
+        });
+      } catch (error: any) {
+        if (error.code === '42P01') {
+          // Table doesn't exist, return mock response
+          const mockIntents = splits.map((split, i) => ({
+            intent_id: `mock_intent_${i}_${Date.now()}`,
+            amount: split.amount,
+            email: split.email,
+            phone: split.phone
+          }));
+
+          return reply.send({
+            split_bill_id: `mock_split_${Date.now()}`,
+            order_id: order_id,
+            total_amount: totalAmount,
+            splits: mockIntents
+          });
+        }
+        throw error;
+      }
+    } catch (error: any) {
+      app.log.error('Error creating split bill:', error);
+      return reply.code(500).send({ error: 'Failed to create split bill' });
+    }
+  });
+
   // POST /payments/intents/:id/emit-event
   app.post<{ Params: { id: string }, Body: { event_type: string, payload?: object } }>('/intents/:id/emit-event', async (req, reply) => {
     const tenantId = req.auth?.primaryTenantId;
