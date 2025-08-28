@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRef } from 'react';
-import { useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { TrendingUp, Users, ShoppingCart, DollarSign, Calendar, Clock } from 'lucide-react';
-import { whoami, getSummary, getRevenue } from '../lib/api';
-import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents } from '../lib/realtime';
+import { whoami, getSummary, getRevenue, getFulfillmentTimeline } from '../lib/api';
 import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents } from '../lib/realtime';
 
 interface User {
@@ -17,9 +15,9 @@ const Dashboard: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [summary, setSummary] = useState<any>(null);
   const [revenueData, setRevenueData] = useState<any[]>([]);
+  const [fulfillmentData, setFulfillmentData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const unsubscribeFunctions = useRef<(() => void)[]>([]);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
 
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h');
@@ -27,18 +25,6 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    
-    return () => {
-      // Cleanup all subscriptions on unmount
-      unsubscribeFunctions.current.forEach(unsubscribe => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
-      unsubscribeFunctions.current = [];
-    };
     
     return () => {
       // Cleanup all subscriptions on unmount
@@ -60,11 +46,6 @@ const Dashboard: React.FC = () => {
       
       const userData = await whoami();
       setUser(userData);
-      
-      // Start realtime listeners if we have a tenant
-      if (userData.primary_tenant_id) {
-        startRealtimeListeners(userData.primary_tenant_id);
-      }
       
       // Start realtime listeners if we have a tenant
       if (userData.primary_tenant_id) {
@@ -93,7 +74,10 @@ const Dashboard: React.FC = () => {
       // Subscribe to order status events for summary updates
       const statusEventsUnsub = subscribeOrderStatusEvents({
         tenantId,
-        onInsert: () => refetchSummary()
+        onInsert: () => {
+          refetchSummary();
+          refetchFulfillment();
+        }
       });
       unsubscribeFunctions.current.push(statusEventsUnsub);
 
@@ -127,61 +111,32 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const startRealtimeListeners = (tenantId: string) => {
+  const refetchFulfillment = async () => {
     try {
-      // Subscribe to orders for summary updates
-      const ordersUnsub = subscribeOrders({
-        tenantId,
-        onInsert: () => refetchSummary(),
-        onUpdate: () => refetchSummary()
-      });
-      unsubscribeFunctions.current.push(ordersUnsub);
-
-      // Subscribe to order status events for summary updates
-      const statusEventsUnsub = subscribeOrderStatusEvents({
-        tenantId,
-        onInsert: () => refetchSummary()
-      });
-      unsubscribeFunctions.current.push(statusEventsUnsub);
-
-      // Subscribe to payment intents for revenue updates
-      const paymentIntentsUnsub = subscribePaymentIntents({
-        tenantId,
-        onInsert: () => refetchRevenue(),
-        onUpdate: () => refetchRevenue()
-      });
-      unsubscribeFunctions.current.push(paymentIntentsUnsub);
+      const fulfillmentData = await getFulfillmentTimeline(timeWindow);
+      setFulfillmentData(fulfillmentData.rows || []);
     } catch (error) {
-      console.error('Error starting realtime listeners:', error);
-    }
-  };
-
-  const refetchSummary = async () => {
-    try {
-      const summaryData = await getSummary(timeWindow);
-      setSummary(summaryData);
-    } catch (error) {
-      console.error('Error refetching summary:', error);
-    }
-  };
-
-  const refetchRevenue = async () => {
-    try {
-      const revenueData = await getRevenue(timeWindow, granularity);
-      setRevenueData(revenueData);
-    } catch (error) {
-      console.error('Error refetching revenue:', error);
+      console.error('Error refetching fulfillment:', error);
     }
   };
 
   const loadAnalytics = async () => {
-    const [summaryData, revenueData] = await Promise.all([
+    const [summaryData, revenueData, fulfillmentData] = await Promise.all([
       getSummary(timeWindow),
-      getRevenue(timeWindow, granularity)
+      getRevenue(timeWindow, granularity),
+      getFulfillmentTimeline(timeWindow)
     ]);
     
     setSummary(summaryData);
     setRevenueData(revenueData);
+    setFulfillmentData(fulfillmentData.rows || []);
+  };
+
+  const formatDuration = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (loading) {
@@ -294,9 +249,7 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={
-
-export default ReactrevenueData}>
+            <LineChart data={revenueData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="period" />
               <YAxis />
@@ -304,6 +257,52 @@ export default ReactrevenueData}>
               <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={2} />
             </LineChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Order Fulfillment Timeline */}
+      <div className="bg-white p-6 rounded-lg shadow">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-gray-900">Order Fulfillment Timeline</h2>
+        </div>
+        <div className="overflow-x-auto">
+          {fulfillmentData.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>No transitions yet</p>
+              <p className="text-sm mt-1">Order status changes will appear here</p>
+            </div>
+          ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    From → To
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Avg Duration
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Transitions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {fulfillmentData.map((row, index) => (
+                  <tr key={index}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <span className="capitalize">{row.from_status}</span> → <span className="capitalize">{row.to_status}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatDuration(row.avg_seconds)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {row.transitions}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
