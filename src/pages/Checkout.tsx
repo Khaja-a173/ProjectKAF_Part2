@@ -1,14 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useRef } from 'react';
-import { useRef } from 'react';
-import { useRef } from 'react';
 import { getPaymentConfig, confirmCheckout, cancelCheckout, emitPaymentEvent } from '../lib/api';
 import MethodPicker from '../components/payments/MethodPicker';
 import PayButton from '../components/payments/PayButton';
-import { subscribePaymentIntents } from '../lib/realtime';
-import { subscribePaymentIntents } from '../lib/realtime';
-import { subscribePaymentIntents } from '../lib/realtime';
+import { subscribePaymentIntents, RealtimeManager } from '../lib/realtime';
 import { ShoppingCart, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 
 interface PaymentConfig {
@@ -39,9 +34,7 @@ export default function Checkout() {
   const [currentIntentId, setCurrentIntentId] = useState<string | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const unsubscribeFunctions = useRef<(() => void)[]>([]);
-  const unsubscribeFunctions = useRef<(() => void)[]>([]);
-  const unsubscribeFunctions = useRef<(() => void)[]>([]);
+  const [realtimeManager] = useState(() => new RealtimeManager());
 
   useEffect(() => {
     loadPaymentConfig();
@@ -51,58 +44,11 @@ export default function Checkout() {
     }
     
     return () => {
-      // Cleanup subscriptions
-      unsubscribeFunctions.current.forEach(unsubscribe => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
-      unsubscribeFunctions.current = [];
-    };
-    
-    return () => {
-      // Cleanup subscriptions
-      unsubscribeFunctions.current.forEach(unsubscribe => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
-      unsubscribeFunctions.current = [];
-    };
-    
-    return () => {
-      // Cleanup subscriptions
-      unsubscribeFunctions.current.forEach(unsubscribe => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
-      unsubscribeFunctions.current = [];
+      realtimeManager.cleanup();
     };
   }, []);
 
   useEffect(() => {
-    // Subscribe to payment intent updates when we have an intent ID
-    if (currentIntentId && paymentConfig.configured) {
-      startPaymentIntentListener(currentIntentId);
-    }
-  }, [currentIntentId, paymentConfig.configured]);
-
-  useEffect(() => {
-    // Subscribe to payment intent updates when we have an intent ID
-    if (currentIntentId && paymentConfig.configured) {
-      startPaymentIntentListener(currentIntentId);
-    }
-  }, [currentIntentId, paymentConfig.configured]);
-
-  useEffect(() => {
-    // Subscribe to payment intent updates when we have an intent ID
     if (currentIntentId && paymentConfig.configured) {
       startPaymentIntentListener(currentIntentId);
     }
@@ -127,10 +73,9 @@ export default function Checkout() {
 
   const startPaymentIntentListener = (intentId: string) => {
     try {
-      // We need tenant ID for the subscription - get it from auth context or API
-      // For now, we'll use a placeholder approach since we don't have direct access to tenant ID here
-      // In a real implementation, you'd get this from your auth context
-      const tenantId = 'current-tenant'; // This should come from auth context
+      // Get tenant ID from localStorage or auth context
+      const qrContext = JSON.parse(localStorage.getItem('qr_context') || '{}');
+      const tenantId = qrContext.tenant?.id || 'current-tenant';
       
       const paymentIntentUnsub = subscribePaymentIntents({
         tenantId,
@@ -140,7 +85,7 @@ export default function Checkout() {
           }
         }
       });
-      unsubscribeFunctions.current.push(paymentIntentUnsub);
+      realtimeManager.addSubscription(paymentIntentUnsub);
     } catch (error) {
       console.error('Error starting payment intent listener:', error);
     }
@@ -154,107 +99,10 @@ export default function Checkout() {
         setProcessing(true);
         break;
       case 'requires_action':
-        // Prompt for 3DS or additional authentication
-        console.log('Payment requires additional action');
+        setProcessing(false);
+        // Show 3DS or additional authentication UI
         break;
       case 'succeeded':
-        // Show success and navigate
-        setProcessing(false);
-        setTimeout(() => {
-          window.location.href = '/checkout/success';
-        }, 1000);
-        break;
-      case 'failed':
-      case 'canceled':
-        // Show error
-        setProcessing(false);
-        setError('Payment failed. Please try again.');
-        break;
-    }
-  };
-
-  const startPaymentIntentListener = (intentId: string) => {
-    try {
-      // We need tenant ID for the subscription - get it from auth context or API
-      // For now, we'll use a placeholder approach since we don't have direct access to tenant ID here
-      // In a real implementation, you'd get this from your auth context
-      const tenantId = 'current-tenant'; // This should come from auth context
-      
-      const paymentIntentUnsub = subscribePaymentIntents({
-        tenantId,
-        onUpdate: (event) => {
-          if (event.new?.id === intentId) {
-            handlePaymentIntentUpdate(event.new);
-          }
-        }
-      });
-      unsubscribeFunctions.current.push(paymentIntentUnsub);
-    } catch (error) {
-      console.error('Error starting payment intent listener:', error);
-    }
-  };
-
-  const handlePaymentIntentUpdate = (intent: any) => {
-    setPaymentStatus(intent.status);
-    
-    switch (intent.status) {
-      case 'processing':
-        setProcessing(true);
-        break;
-      case 'requires_action':
-        // Prompt for 3DS or additional authentication
-        console.log('Payment requires additional action');
-        break;
-      case 'succeeded':
-        // Show success and navigate
-        setProcessing(false);
-        setTimeout(() => {
-          window.location.href = '/checkout/success';
-        }, 1000);
-        break;
-      case 'failed':
-      case 'canceled':
-        // Show error
-        setProcessing(false);
-        setError('Payment failed. Please try again.');
-        break;
-    }
-  };
-
-  const startPaymentIntentListener = (intentId: string) => {
-    try {
-      // We need tenant ID for the subscription - get it from auth context or API
-      // For now, we'll use a placeholder approach since we don't have direct access to tenant ID here
-      // In a real implementation, you'd get this from your auth context
-      const tenantId = 'current-tenant'; // This should come from auth context
-      
-      const paymentIntentUnsub = subscribePaymentIntents({
-        tenantId,
-        onUpdate: (event) => {
-          if (event.new?.id === intentId) {
-            handlePaymentIntentUpdate(event.new);
-          }
-        }
-      });
-      unsubscribeFunctions.current.push(paymentIntentUnsub);
-    } catch (error) {
-      console.error('Error starting payment intent listener:', error);
-    }
-  };
-
-  const handlePaymentIntentUpdate = (intent: any) => {
-    setPaymentStatus(intent.status);
-    
-    switch (intent.status) {
-      case 'processing':
-        setProcessing(true);
-        break;
-      case 'requires_action':
-        // Prompt for 3DS or additional authentication
-        console.log('Payment requires additional action');
-        break;
-      case 'succeeded':
-        // Show success and navigate
         setProcessing(false);
         setTimeout(() => {
           window.location.href = '/checkout/success';
@@ -439,6 +287,13 @@ export default function Checkout() {
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">Processing Payment</h3>
                     <p className="text-gray-600">Please wait while we process your payment...</p>
+                    {paymentStatus === 'requires_action' && (
+                      <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <p className="text-sm text-yellow-800">
+                          Additional authentication required. Please complete the verification step.
+                        </p>
+                      </div>
+                    )}
                     <button
                       onClick={handleCancelPayment}
                       className="mt-4 px-4 py-2 text-sm text-gray-600 hover:text-gray-800 focus:outline-none"
@@ -474,6 +329,16 @@ export default function Checkout() {
                         )}
                       </div>
                     )}
+
+                    {/* Split Bill Option */}
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                      <p className="text-sm text-blue-800 mb-2">
+                        <strong>Split Bill:</strong> Share payment with others at your table
+                      </p>
+                      <button className="text-sm text-blue-600 hover:text-blue-800 underline">
+                        Enable Split Payment
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

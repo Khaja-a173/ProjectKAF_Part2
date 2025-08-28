@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { TrendingUp, Users, ShoppingCart, DollarSign, Calendar, Clock } from 'lucide-react';
-import { whoami, getSummary, getRevenue, getFulfillmentTimeline } from '../lib/api';
-import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents } from '../lib/realtime';
+import { whoami, getSummary, getRevenue, getFulfillmentTimeline, getTopItems } from '../lib/api';
+import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents, RealtimeManager } from '../lib/realtime';
 import PaymentFunnel from '../components/analytics/PaymentFunnel';
 import PeakHours from '../components/analytics/PeakHours';
 import RevenueSeries from '../components/analytics/RevenueSeries';
@@ -19,12 +18,13 @@ const Dashboard: React.FC = () => {
   const [summary, setSummary] = useState<any>(null);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [fulfillmentData, setFulfillmentData] = useState<any[]>([]);
+  const [topItemsData, setTopItemsData] = useState<any[]>([]);
   const [funnelRefreshTrigger, setFunnelRefreshTrigger] = useState(0);
   const [peakHoursRefreshTrigger, setPeakHoursRefreshTrigger] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revenueSeriesRefreshTrigger, setRevenueSeriesRefreshTrigger] = useState(0);
-  const unsubscribeFunctions = useRef<(() => void)[]>([]);
+  const [realtimeManager] = useState(() => new RealtimeManager());
 
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h');
   const [granularity, setGranularity] = useState<'hour' | 'day'>('hour');
@@ -33,15 +33,7 @@ const Dashboard: React.FC = () => {
     loadData();
     
     return () => {
-      // Cleanup all subscriptions on unmount
-      unsubscribeFunctions.current.forEach(unsubscribe => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
-      unsubscribeFunctions.current = [];
+      realtimeManager.cleanup();
     };
   }, []);
 
@@ -69,41 +61,53 @@ const Dashboard: React.FC = () => {
 
   const startRealtimeListeners = (tenantId: string) => {
     try {
+      // Create debounced callbacks
+      const debouncedSummaryRefresh = realtimeManager.createDebouncedCallback('summary', () => refetchSummary(), 300);
+      const debouncedRevenueRefresh = realtimeManager.createDebouncedCallback('revenue', () => refetchRevenue(), 300);
+      const debouncedFulfillmentRefresh = realtimeManager.createDebouncedCallback('fulfillment', () => refetchFulfillment(), 300);
+      const debouncedTopItemsRefresh = realtimeManager.createDebouncedCallback('topitems', () => refetchTopItems(), 300);
+
       // Subscribe to orders for summary updates
       const ordersUnsub = subscribeOrders({
         tenantId,
-        onInsert: () => refetchSummary(),
-        onUpdate: () => refetchSummary()
+        onInsert: () => {
+          debouncedSummaryRefresh();
+          debouncedTopItemsRefresh();
+        },
+        onUpdate: () => {
+          debouncedSummaryRefresh();
+          debouncedTopItemsRefresh();
+        }
       });
-      unsubscribeFunctions.current.push(ordersUnsub);
+      realtimeManager.addSubscription(ordersUnsub);
 
       // Subscribe to order status events for summary updates
       const statusEventsUnsub = subscribeOrderStatusEvents({
         tenantId,
         onInsert: () => {
-          refetchSummary();
-          refetchFulfillment();
+          debouncedSummaryRefresh();
+          debouncedFulfillmentRefresh();
           triggerPeakHoursRefresh();
         }
       });
-      unsubscribeFunctions.current.push(statusEventsUnsub);
+      realtimeManager.addSubscription(statusEventsUnsub);
 
       // Subscribe to payment intents for revenue updates
       const paymentIntentsUnsub = subscribePaymentIntents({
         tenantId,
         onInsert: () => {
-          refetchRevenue();
+          debouncedRevenueRefresh();
           triggerFunnelRefresh();
           triggerRevenueSeriesRefresh();
         },
         onUpdate: () => {
-          refetchRevenue();
+          debouncedRevenueRefresh();
           triggerFunnelRefresh();
           triggerPeakHoursRefresh();
           triggerRevenueSeriesRefresh();
         }
       });
-      unsubscribeFunctions.current.push(paymentIntentsUnsub);
+      realtimeManager.addSubscription(paymentIntentsUnsub);
     } catch (error) {
       console.error('Error starting realtime listeners:', error);
     }
@@ -136,6 +140,15 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const refetchTopItems = async () => {
+    try {
+      const topItemsData = await getTopItems(timeWindow);
+      setTopItemsData(topItemsData.items || []);
+    } catch (error) {
+      console.error('Error refetching top items:', error);
+    }
+  };
+
   const triggerFunnelRefresh = () => {
     setFunnelRefreshTrigger(prev => prev + 1);
   };
@@ -149,15 +162,17 @@ const Dashboard: React.FC = () => {
   };
 
   const loadAnalytics = async () => {
-    const [summaryData, revenueData, fulfillmentData] = await Promise.all([
+    const [summaryData, revenueData, fulfillmentData, topItemsData] = await Promise.all([
       getSummary(timeWindow),
       getRevenue(timeWindow, granularity),
-      getFulfillmentTimeline(timeWindow)
+      getFulfillmentTimeline(timeWindow),
+      getTopItems(timeWindow)
     ]);
     
     setSummary(summaryData);
     setRevenueData(revenueData);
     setFulfillmentData(fulfillmentData.rows || []);
+    setTopItemsData(topItemsData.items || []);
   };
 
   const formatDuration = (seconds: number) => {
@@ -351,6 +366,65 @@ const Dashboard: React.FC = () => {
         window={timeWindow} 
         key={`${timeWindow}-${peakHoursRefreshTrigger}`}
       />
+
+      {/* Top Selling Items */}
+      <div className="bg-white p-6 rounded-lg shadow">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-gray-900">Top Selling Items</h2>
+        </div>
+        <div className="overflow-x-auto">
+          {topItemsData.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>No items sold yet</p>
+              <p className="text-sm mt-1">Item sales will appear here</p>
+            </div>
+          ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Item
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Quantity Sold
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Revenue
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Avg Price
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {topItemsData.slice(0, 10).map((item, index) => (
+                  <tr key={index} className={index < 3 ? 'bg-yellow-50' : ''}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        {index < 3 && (
+                          <span className="inline-flex items-center justify-center w-6 h-6 mr-2 text-xs font-bold text-white bg-yellow-500 rounded-full">
+                            {index + 1}
+                          </span>
+                        )}
+                        <span className="text-sm font-medium text-gray-900">{item.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {item.quantity_sold}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      ${parseFloat(item.total_revenue || '0').toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      ${parseFloat(item.avg_price || '0').toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

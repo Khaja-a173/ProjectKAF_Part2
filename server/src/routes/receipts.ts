@@ -56,6 +56,48 @@ const receiptsRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // POST /receipts/invoice/:orderId - Generate PDF invoice
+  app.post<{ Params: { orderId: string } }>('/invoice/:orderId', async (req, reply) => {
+    const tenantId = req.auth?.primaryTenantId;
+    if (!tenantId) {
+      return reply.code(401).send({ error: 'Missing tenant ID' });
+    }
+
+    const { orderId } = req.params;
+
+    try {
+      // Verify order exists and belongs to tenant
+      const orderResult = await app.pg.query(
+        'SELECT id FROM orders WHERE id = $1 AND tenant_id = $2',
+        [orderId, tenantId]
+      );
+
+      if (orderResult.rows.length === 0) {
+        return reply.code(404).send({ error: 'Order not found' });
+      }
+
+      // Log the PDF generation request
+      app.log.info('PDF invoice generation requested', {
+        order_id: orderId,
+        tenant_id: tenantId
+      });
+
+      // TODO: Implement actual PDF generation
+      // For now, return a mock PDF response
+      const mockPDF = Buffer.from('Mock PDF content for order ' + orderId);
+      
+      reply.header('Content-Type', 'application/pdf');
+      reply.header('Content-Disposition', `attachment; filename="invoice-${orderId}.pdf"`);
+      return reply.send(mockPDF);
+    } catch (error: any) {
+      app.log.error('Error generating PDF invoice:', error);
+      if (error.code === '42P01') {
+        return reply.code(503).send({ error: 'Service not available', reason: 'missing_table' });
+      }
+      return reply.code(500).send({ error: 'Failed to generate PDF invoice' });
+    }
+  });
+
   // POST /receipts/print - Print receipt to thermal printer
   app.post<{ Body: { order_id: string; printer_id?: string } }>('/print', async (req, reply) => {
     const tenantId = req.auth?.primaryTenantId;

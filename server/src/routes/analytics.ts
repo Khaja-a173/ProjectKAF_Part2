@@ -304,4 +304,72 @@ app.get<{ Querystring: { window?: string } }>('/payment-funnel', {
   }
 });
 
+// GET /analytics/top-items
+app.get<{ Querystring: { window?: string } }>('/top-items', {
+  preHandler: [app.requireAuth]
+}, async (req, reply) => {
+  const tenantId = req.auth?.primaryTenantId;
+  if (!tenantId) {
+    return reply.code(400).send({ error: 'tenant_missing' });
+  }
+
+  const window = req.query.window || '7d';
+  
+  // Map window to interval text
+  const windowMap: Record<string, string> = {
+    '7d': '7 days',
+    '30d': '30 days', 
+    '90d': '90 days',
+    'mtd': '1 month',
+    'qtd': '3 months',
+    'ytd': '1 year'
+  };
+
+  const intervalText = windowMap[window];
+  if (!intervalText) {
+    return reply.code(400).send({ error: 'Invalid window parameter' });
+  }
+
+  try {
+    // Try to call the function if it exists, otherwise use direct query
+    let result;
+    try {
+      result = await app.pg.query(
+        'SELECT * FROM app.top_items($1, $2, $3)',
+        [tenantId, 'custom', 10]
+      );
+    } catch (error: any) {
+      if (error.code === '42883') { // Function does not exist
+        // Fallback to direct query
+        result = await app.pg.query(`
+          SELECT 
+            mi.id,
+            mi.name,
+            SUM(oi.quantity) as quantity_sold,
+            SUM(oi.quantity * oi.unit_price) as total_revenue,
+            AVG(oi.unit_price) as avg_price
+          FROM order_items oi
+          JOIN menu_items mi ON oi.menu_item_id = mi.id
+          JOIN orders o ON oi.order_id = o.id
+          WHERE o.tenant_id = $1 
+            AND o.created_at >= NOW() - INTERVAL '${intervalText}'
+          GROUP BY mi.id, mi.name
+          ORDER BY quantity_sold DESC, total_revenue DESC
+          LIMIT 10
+        `, [tenantId]);
+      } else {
+        throw error;
+      }
+    }
+
+    return reply.send({
+      window,
+      items: result.rows
+    });
+  } catch (error: any) {
+    app.log.error('Error fetching top items:', error);
+    return reply.code(500).send({ error: 'Failed to fetch top items' });
+  }
+});
+
 };

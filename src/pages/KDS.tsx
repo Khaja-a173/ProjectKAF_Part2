@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useRef } from 'react';
 import { Clock, ChefHat, CheckCircle, AlertCircle } from 'lucide-react';
 import { whoami, getKDSLanes, advanceKDSOrder } from '../lib/api';
-import { subscribeOrderStatusEvents, createDebouncedCallback } from '../lib/realtime';
+import { subscribeOrderStatusEvents, subscribeOrders, RealtimeManager } from '../lib/realtime';
 
 interface KDSLanes {
   queued: KDSOrder[];
@@ -31,24 +30,13 @@ const KDSPage = () => {
   const [lanes, setLanes] = useState<KDSLanes>({ queued: [], preparing: [], ready: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const unsubscribeFunctions = useRef<(() => void)[]>([]);
-  const debouncedRefetch = useRef<(() => void) | null>(null);
+  const [realtimeManager] = useState(() => new RealtimeManager());
 
   useEffect(() => {
     loadKDSData();
     
     return () => {
-      // Cleanup subscriptions
-      unsubscribeFunctions.current.forEach(unsubscribe => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
-      unsubscribeFunctions.current = [];
-      
-      // No need to cleanup debounced function as it's handled internally
+      realtimeManager.cleanup();
     };
   }, []);
 
@@ -66,11 +54,6 @@ const KDSPage = () => {
         startRealtimeListeners(userData.primary_tenant_id);
       }
 
-      // Create debounced refetch function
-      debouncedRefetch.current = createDebouncedCallback(() => {
-        loadKDSLanes();
-      }, 300);
-
       const kdsData = await getKDSLanes();
       setLanes(kdsData);
       setError(null);
@@ -84,16 +67,25 @@ const KDSPage = () => {
 
   const startRealtimeListeners = (tenantId: string) => {
     try {
+      // Create debounced refetch function
+      const debouncedRefetch = realtimeManager.createDebouncedCallback('kds-refresh', () => {
+        loadKDSLanes();
+      }, 300);
+
+      // Subscribe to orders for new orders
+      const ordersUnsub = subscribeOrders({
+        tenantId,
+        onInsert: () => debouncedRefetch(),
+        onUpdate: () => debouncedRefetch()
+      });
+      realtimeManager.addSubscription(ordersUnsub);
+
       // Subscribe to order status events to update lanes in real-time
       const statusEventsUnsub = subscribeOrderStatusEvents({
         tenantId,
-        onInsert: (event) => {
-          if (event.new?.order_id && debouncedRefetch.current) {
-            debouncedRefetch.current();
-          }
-        }
+        onInsert: () => debouncedRefetch()
       });
-      unsubscribeFunctions.current.push(statusEventsUnsub);
+      realtimeManager.addSubscription(statusEventsUnsub);
     } catch (error) {
       console.error('Error starting KDS realtime listeners:', error);
     }
@@ -110,11 +102,39 @@ const KDSPage = () => {
 
   const handleAdvanceOrder = async (orderId: string, toStatus: string) => {
     try {
+      // Optimistic update
+      setLanes(prevLanes => {
+        const newLanes = { ...prevLanes };
+        
+        // Find and move order between lanes
+        Object.keys(newLanes).forEach(laneKey => {
+          const lane = newLanes[laneKey as keyof KDSLanes];
+          const orderIndex = lane.findIndex(order => order.id === orderId);
+          
+          if (orderIndex !== -1) {
+            const order = { ...lane[orderIndex], current_status: toStatus };
+            lane.splice(orderIndex, 1);
+            
+            // Add to appropriate lane
+            if (toStatus === 'preparing') {
+              newLanes.preparing.push(order);
+            } else if (toStatus === 'ready') {
+              newLanes.ready.push(order);
+            }
+            // 'served' orders are removed from KDS
+          }
+        });
+        
+        return newLanes;
+      });
+
       await advanceKDSOrder(orderId, toStatus);
-      // The realtime listener will update the UI automatically
+      // Realtime will sync any discrepancies
     } catch (error) {
       console.error('Error advancing order:', error);
       setError('Failed to advance order status');
+      // Revert optimistic update on error
+      loadKDSLanes();
     }
   };
 
@@ -180,13 +200,13 @@ const KDSPage = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Queued Lane */}
-          <div className="bg-white rounded-lg shadow-md">
+          <div className="bg-white rounded-lg shadow-md transition-all duration-200 hover:shadow-lg">
             <div className="bg-yellow-500 text-white px-4 py-3 rounded-t-lg">
               <h2 className="text-lg font-semibold">Queued ({lanes.queued.length})</h2>
             </div>
             <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
               {lanes.queued.map((order) => (
-                <div key={order.id} className="border rounded-lg p-4">
+                <div key={order.id} className="border rounded-lg p-4 transition-all duration-200 hover:shadow-md hover:border-yellow-300">
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="font-semibold text-gray-900">
                       Order #{order.id.slice(-8)}
@@ -215,7 +235,7 @@ const KDSPage = () => {
                     </span>
                     <button
                       onClick={() => handleAdvanceOrder(order.id, 'preparing')}
-                      className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                      className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors duration-200"
                     >
                       Start Preparing
                     </button>
@@ -226,13 +246,13 @@ const KDSPage = () => {
           </div>
 
           {/* Preparing Lane */}
-          <div className="bg-white rounded-lg shadow-md">
+          <div className="bg-white rounded-lg shadow-md transition-all duration-200 hover:shadow-lg">
             <div className="bg-blue-500 text-white px-4 py-3 rounded-t-lg">
               <h2 className="text-lg font-semibold">Preparing ({lanes.preparing.length})</h2>
             </div>
             <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
               {lanes.preparing.map((order) => (
-                <div key={order.id} className="border rounded-lg p-4 border-blue-200">
+                <div key={order.id} className="border rounded-lg p-4 border-blue-200 transition-all duration-200 hover:shadow-md hover:border-blue-400">
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="font-semibold text-gray-900">
                       Order #{order.id.slice(-8)}
@@ -261,7 +281,7 @@ const KDSPage = () => {
                     </span>
                     <button
                       onClick={() => handleAdvanceOrder(order.id, 'ready')}
-                      className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                      className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors duration-200"
                     >
                       Mark Ready
                     </button>
@@ -272,13 +292,13 @@ const KDSPage = () => {
           </div>
 
           {/* Ready Lane */}
-          <div className="bg-white rounded-lg shadow-md">
+          <div className="bg-white rounded-lg shadow-md transition-all duration-200 hover:shadow-lg">
             <div className="bg-green-500 text-white px-4 py-3 rounded-t-lg">
               <h2 className="text-lg font-semibold">Ready ({lanes.ready.length})</h2>
             </div>
             <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
               {lanes.ready.map((order) => (
-                <div key={order.id} className="border rounded-lg p-4 border-green-200">
+                <div key={order.id} className="border rounded-lg p-4 border-green-200 transition-all duration-200 hover:shadow-md hover:border-green-400 animate-pulse">
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="font-semibold text-gray-900">
                       Order #{order.id.slice(-8)}
@@ -307,7 +327,7 @@ const KDSPage = () => {
                     </span>
                     <button
                       onClick={() => handleAdvanceOrder(order.id, 'served')}
-                      className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700"
+                      className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors duration-200"
                     >
                       Mark Served
                     </button>

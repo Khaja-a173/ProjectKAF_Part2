@@ -177,3 +177,39 @@ export const createDebouncedCallback = (callback: () => void, delay: number = 30
     }, delay);
   };
 };
+
+// Multi-subscription manager for complex components
+export class RealtimeManager {
+  private subscriptions: (() => void)[] = [];
+  private debouncedCallbacks: Map<string, () => void> = new Map();
+
+  // Add a subscription and track it for cleanup
+  addSubscription(subscription: () => void): void {
+    this.subscriptions.push(subscription);
+  }
+
+  // Create and track a debounced callback
+  createDebouncedCallback(key: string, callback: () => void, delay: number = 300): () => void {
+    const debouncedFn = createDebouncedCallback(callback, delay);
+    this.debouncedCallbacks.set(key, debouncedFn);
+    return debouncedFn;
+  }
+
+  // Get existing debounced callback
+  getDebouncedCallback(key: string): (() => void) | undefined {
+    return this.debouncedCallbacks.get(key);
+  }
+
+  // Clean up all subscriptions and callbacks
+  cleanup(): void {
+    this.subscriptions.forEach(unsubscribe => {
+      try {
+        unsubscribe();
+      } catch (error) {
+        console.error('Error during subscription cleanup:', error);
+      }
+    });
+    this.subscriptions = [];
+    this.debouncedCallbacks.clear();
+  }
+}
