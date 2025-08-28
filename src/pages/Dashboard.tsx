@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { TrendingUp, Users, ShoppingCart, DollarSign, Calendar, Clock } from 'lucide-react';
 import { whoami, getSummary, getRevenue, getFulfillmentTimeline } from '../lib/api';
 import { subscribeOrders, subscribeOrderStatusEvents, subscribePaymentIntents } from '../lib/realtime';
+import PaymentFunnel from '../components/analytics/PaymentFunnel';
 
 interface User {
   id: string;
@@ -16,6 +17,7 @@ const Dashboard: React.FC = () => {
   const [summary, setSummary] = useState<any>(null);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [fulfillmentData, setFulfillmentData] = useState<any[]>([]);
+  const [funnelRefreshTrigger, setFunnelRefreshTrigger] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const unsubscribeFunctions = useRef<(() => void)[]>([]);
@@ -84,8 +86,14 @@ const Dashboard: React.FC = () => {
       // Subscribe to payment intents for revenue updates
       const paymentIntentsUnsub = subscribePaymentIntents({
         tenantId,
-        onInsert: () => refetchRevenue(),
-        onUpdate: () => refetchRevenue()
+        onInsert: () => {
+          refetchRevenue();
+          triggerFunnelRefresh();
+        },
+        onUpdate: () => {
+          refetchRevenue();
+          triggerFunnelRefresh();
+        }
       });
       unsubscribeFunctions.current.push(paymentIntentsUnsub);
     } catch (error) {
@@ -118,6 +126,10 @@ const Dashboard: React.FC = () => {
     } catch (error) {
       console.error('Error refetching fulfillment:', error);
     }
+  };
+
+  const triggerFunnelRefresh = () => {
+    setFunnelRefreshTrigger(prev => prev + 1);
   };
 
   const loadAnalytics = async () => {
@@ -305,6 +317,12 @@ const Dashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Payment Funnel */}
+      <PaymentFunnel 
+        window={timeWindow} 
+        key={`${timeWindow}-${funnelRefreshTrigger}`}
+      />
     </div>
   );
 };

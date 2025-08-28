@@ -458,4 +458,27 @@ export const getFulfillmentTimeline = async (window: string = '7d') => {
   return response.json();
 };
 
+export const getPaymentFunnel = async (window: string = '7d') => {
+  // Validate window parameter
+  const validWindows = ['7d', '30d', '90d', 'mtd', 'qtd', 'ytd'];
+  const validatedWindow = validWindows.includes(window) ? window : '7d';
+  
+  const response = await fetch(`${API_BASE_URL}/analytics/payment-funnel?window=${validatedWindow}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication required');
+    }
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to get payment funnel');
+  }
+
+  return response.json();
+};
+
 export default {
